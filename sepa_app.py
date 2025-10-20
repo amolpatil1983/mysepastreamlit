@@ -1594,22 +1594,47 @@ def display_screening_results(qualified_stocks, total_screened):
 def display_mini_analysis(stock):
     """Display condensed analysis for a stock"""
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.metric("SEPA Score", f"{stock['sepa_score']}/10")
     with col2:
         st.metric("Price", f"₹{stock['current_price']}")
     with col3:
-        st.metric("RS Rating", stock.get('rs_rating', 'N/A'))
+        rs_val = stock.get('rs_rating', 'N/A')
+        rs_emoji = "🟢" if rs_val != 'N/A' and rs_val >= 80 else "🟡" if rs_val != 'N/A' and rs_val >= 70 else "🟠"
+        st.metric(f"{rs_emoji} RS Rating", rs_val)
     with col4:
+        vcp_score = stock.get('vcp_score', 0)
+        vcp_emoji = "🟢" if vcp_score >= 75 else "🟡" if vcp_score >= 60 else "🟠"
+        st.metric(f"{vcp_emoji} VCP Quality", f"{vcp_score}/100" if vcp_score else 'N/A')
+    with col5:
         st.metric("Recommendation", stock['recommendation'])
+    
+    # RS Details
+    if 'rs_metrics' in stock:
+        rs_m = stock['rs_metrics']
+        st.markdown(f"""
+        **RS Analysis:** Percentile: {rs_m.get('percentile', 'N/A')}% | 
+        Quarter: {rs_m.get('quarter_performance', 0):.1f}% | 
+        Half-Year: {rs_m.get('half_year_performance', 0):.1f}% | 
+        Year: {rs_m.get('year_performance', 0):.1f}%
+        """)
+    
+    # VCP Details
+    if 'vcp_quality' in stock:
+        vcp_q = stock['vcp_quality']
+        st.markdown(f"""
+        **VCP Analysis:** Stage: {vcp_q.get('stage', 'Unknown')} | 
+        {vcp_q.get('recommendation', 'No VCP')}
+        """)
     
     if 'entry_analysis' in stock:
         entry = stock['entry_analysis']
         st.markdown(f"""
         **Entry Points:** Breakout at ₹{entry['pivot_entry']} | Pullback at ₹{entry['pullback_entry']}  
         **Stop Loss:** ₹{entry['stop_loss']} | **Risk/Reward:** {entry['risk_reward_ratio']}:1
+        """)stop_loss']} | **Risk/Reward:** {entry['risk_reward_ratio']}:1
         """)
 
 

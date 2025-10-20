@@ -22,8 +22,7 @@ uploaded_file = st.file_uploader("📂 Upload CSV with stock symbols", type=["cs
 
 if uploaded_file is not None:
     symbols = pd.read_csv(uploaded_file, header=None)[0].dropna().unique().tolist()
-    df = pd.read_csv(uploaded_file)
-    symbols = [s.strip().upper() + ".NS" for s in df["Symbol"].dropna().unique()]
+    symbols = [s+".NS" for s in symbols]
     st.write(f"✅ Loaded {len(symbols)} stock symbols")
 
     end_date = datetime.today()

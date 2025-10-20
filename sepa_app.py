@@ -48,9 +48,9 @@ if uploaded_file is not None:
     for sym in symbols:
         try:
             if isinstance(data.columns, pd.MultiIndex):
-                adj_close = data[sym]["Adj Close"].dropna()
+                adj_close = data[sym]["Close"].dropna()
             else:
-                adj_close = data["Adj Close"].dropna()
+                adj_close = data["Close"].dropna()
             if not adj_close.empty:
                 prices[sym] = adj_close
             else:

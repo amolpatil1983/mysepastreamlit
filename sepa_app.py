@@ -7,10 +7,10 @@ import plotly.graph_objects as go
 
 # Configuration
 TIMEFRAMES = {
-    '1Y': 252,
-    '6M': 126,
-    '3M': 63,
-    '1M': 21
+    '1Y': 240,  # ~1 year (relaxed from 252)
+    '6M': 120,  # ~6 months (relaxed from 126)
+    '3M': 60,   # ~3 months (relaxed from 63)
+    '1M': 20    # ~1 month (relaxed from 21)
 }
 
 WEIGHTS = {

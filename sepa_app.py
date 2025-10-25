@@ -34,8 +34,7 @@ def fetch_stock_data(symbol, period='1y'):
 
 def create_composite_index(symbols, period='1y'):
     """Create equal-weighted composite index from stock universe"""
-    all_prices = []
-    valid_symbols = []
+    stock_prices_dict = {}
     failed_symbols = []
     
     progress_bar = st.progress(0)
@@ -47,8 +46,7 @@ def create_composite_index(symbols, period='1y'):
         
         prices = fetch_stock_data(nse_symbol, period)
         if prices is not None:
-            all_prices.append(prices)
-            valid_symbols.append(symbol)
+            stock_prices_dict[symbol] = prices
         else:
             failed_symbols.append(symbol)
         
@@ -57,17 +55,17 @@ def create_composite_index(symbols, period='1y'):
     progress_bar.empty()
     status_text.empty()
     
-    if not all_prices:
-        return None, valid_symbols, failed_symbols
+    if not stock_prices_dict:
+        return None, stock_prices_dict, failed_symbols
     
     # Align all price series to common dates
-    aligned_prices = pd.concat(all_prices, axis=1, join='inner')
+    all_prices_df = pd.concat(stock_prices_dict.values(), axis=1, join='inner', keys=stock_prices_dict.keys())
     
     # Calculate equal-weighted index (average of normalized prices)
-    normalized = aligned_prices.div(aligned_prices.iloc[0]) * 100
+    normalized = all_prices_df.div(all_prices_df.iloc[0]) * 100
     composite_index = normalized.mean(axis=1)
     
-    return composite_index, valid_symbols, failed_symbols
+    return composite_index, stock_prices_dict, failed_symbols
 
 def calculate_return(prices, days):
     """Calculate percentage return over specified days"""
@@ -75,60 +73,63 @@ def calculate_return(prices, days):
         return np.nan
     return ((prices.iloc[-1] - prices.iloc[-days]) / prices.iloc[-days]) * 100
 
-def calculate_rs_rating(valid_symbols, composite_index):
+def calculate_rs_rating(stock_prices_dict, composite_index):
     """Calculate RS rating for all stocks"""
     results = []
+    skipped = []
     
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    for idx, symbol in enumerate(valid_symbols):
-        nse_symbol = f"{symbol}.NS"
-        status_text.text(f"Calculating RS for {symbol}... ({idx+1}/{len(valid_symbols)})")
-        
-        prices = fetch_stock_data(nse_symbol)
-        if prices is None:
-            continue
+    for idx, (symbol, prices) in enumerate(stock_prices_dict.items()):
+        status_text.text(f"Calculating RS for {symbol}... ({idx+1}/{len(stock_prices_dict)})")
         
         # Align stock prices with composite index
-        aligned = pd.concat([prices, composite_index], axis=1, join='inner').dropna()
-        if len(aligned) < TIMEFRAMES['1Y']:
+        try:
+            aligned = pd.concat([prices, composite_index], axis=1, join='inner').dropna()
+            
+            if len(aligned) < TIMEFRAMES['1Y']:
+                skipped.append(f"{symbol} (insufficient data)")
+                continue
+            
+            stock_prices = aligned.iloc[:, 0]
+            index_prices = aligned.iloc[:, 1]
+            
+            stock_returns = {}
+            index_returns = {}
+            
+            # Calculate returns for each timeframe
+            for period, days in TIMEFRAMES.items():
+                stock_returns[period] = calculate_return(stock_prices, days)
+                index_returns[period] = calculate_return(index_prices, days)
+            
+            # Skip if any return is NaN
+            if any(np.isnan(list(stock_returns.values()))) or any(np.isnan(list(index_returns.values()))):
+                skipped.append(f"{symbol} (NaN returns)")
+                continue
+            
+            # Calculate relative performance (stock return - index return)
+            relative_perf = {
+                period: stock_returns[period] - index_returns[period]
+                for period in TIMEFRAMES.keys()
+            }
+            
+            results.append({
+                'Symbol': symbol,
+                **{f'Return_{k}': v for k, v in stock_returns.items()},
+                **{f'RelPerf_{k}': v for k, v in relative_perf.items()}
+            })
+        except Exception as e:
+            skipped.append(f"{symbol} (error: {str(e)[:30]})")
             continue
         
-        stock_prices = aligned.iloc[:, 0]
-        index_prices = aligned.iloc[:, 1]
-        
-        stock_returns = {}
-        index_returns = {}
-        
-        # Calculate returns for each timeframe
-        for period, days in TIMEFRAMES.items():
-            stock_returns[period] = calculate_return(stock_prices, days)
-            index_returns[period] = calculate_return(index_prices, days)
-        
-        # Skip if any return is NaN
-        if any(np.isnan(list(stock_returns.values()))) or any(np.isnan(list(index_returns.values()))):
-            continue
-        
-        # Calculate relative performance (stock return - index return)
-        relative_perf = {
-            period: stock_returns[period] - index_returns[period]
-            for period in TIMEFRAMES.keys()
-        }
-        
-        results.append({
-            'Symbol': symbol,
-            **{f'Return_{k}': v for k, v in stock_returns.items()},
-            **{f'RelPerf_{k}': v for k, v in relative_perf.items()}
-        })
-        
-        progress_bar.progress((idx + 1) / len(valid_symbols))
+        progress_bar.progress((idx + 1) / len(stock_prices_dict))
     
     progress_bar.empty()
     status_text.empty()
     
     if not results:
-        return None
+        return None, skipped
     
     df = pd.DataFrame(results)
     
@@ -147,7 +148,7 @@ def calculate_rs_rating(valid_symbols, composite_index):
     df = df.sort_values('RS_Rating', ascending=False).reset_index(drop=True)
     df['Rank'] = df.index + 1
     
-    return df
+    return df, skipped
 
 def create_rs_chart(df, top_n=20):
     """Create visualization of top RS rated stocks"""
@@ -234,11 +235,13 @@ if uploaded_file is not None:
         
         # Create composite index
         with st.spinner("Creating composite index from stock universe..."):
-            composite_index, valid_symbols, failed_symbols = create_composite_index(symbols)
+            composite_index, stock_prices_dict, failed_symbols = create_composite_index(symbols)
         
         if composite_index is None:
             st.error("❌ Failed to create composite index. No valid data retrieved.")
             st.stop()
+        
+        valid_symbols = list(stock_prices_dict.keys())
         
         # Show data retrieval summary
         col1, col2, col3 = st.columns(3)
@@ -255,12 +258,21 @@ if uploaded_file is not None:
         
         # Calculate RS ratings
         with st.spinner("Calculating RS ratings..."):
-            results_df = calculate_rs_rating(valid_symbols, composite_index)
+            results_df, skipped = calculate_rs_rating(stock_prices_dict, composite_index)
         
         if results_df is None or len(results_df) == 0:
             st.error("❌ No valid RS ratings calculated")
+            if skipped:
+                with st.expander("🔍 Debug: View skipped stocks"):
+                    for item in skipped:
+                        st.text(item)
         else:
             st.success(f"✅ Processed {len(results_df)} stocks")
+            
+            if skipped:
+                with st.expander(f"⚠️ Skipped {len(skipped)} stocks during RS calculation"):
+                    for item in skipped[:50]:  # Show first 50
+                        st.text(item)
             
             # Display options
             top_n = st.slider("Top N stocks to display", 10, min(50, len(results_df)), 20)

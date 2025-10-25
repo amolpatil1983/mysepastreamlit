@@ -55,26 +55,50 @@ def create_composite_index(symbols, period='1y'):
     progress_bar.empty()
     status_text.empty()
     
-    if not stock_prices_dict:
+    if len(stock_prices_dict) < 10:  # Need at least 10 stocks
         return None, stock_prices_dict, failed_symbols
     
-    # Use outer join to keep all dates, then forward fill missing values
-    all_prices_df = pd.concat(stock_prices_dict.values(), axis=1, join='outer', keys=stock_prices_dict.keys())
-    all_prices_df = all_prices_df.sort_index()
+    # Find common date range across all stocks
+    all_dates = None
+    for prices in stock_prices_dict.values():
+        if all_dates is None:
+            all_dates = set(prices.index)
+        else:
+            all_dates = all_dates.intersection(set(prices.index))
     
-    # Forward fill missing values (stocks that weren't trading on certain days)
-    all_prices_df = all_prices_df.fillna(method='ffill')
-    
-    # Only keep dates where at least 50% of stocks have data
-    threshold = len(stock_prices_dict) * 0.5
-    all_prices_df = all_prices_df.dropna(thresh=threshold)
-    
-    if len(all_prices_df) < TIMEFRAMES['1Y']:
-        return None, stock_prices_dict, failed_symbols
-    
-    # Calculate equal-weighted index (average of normalized prices)
-    normalized = all_prices_df.div(all_prices_df.iloc[0]) * 100
-    composite_index = normalized.mean(axis=1)
+    if len(all_dates) < TIMEFRAMES['1Y']:
+        # Not enough common dates, use a more lenient approach
+        # Get the most recent 252 trading days that most stocks have
+        all_prices_list = list(stock_prices_dict.values())
+        combined = pd.concat(all_prices_list, axis=1, join='outer').sort_index()
+        
+        # Keep only rows where at least 70% of stocks have data
+        threshold = int(len(stock_prices_dict) * 0.7)
+        combined = combined.dropna(thresh=threshold)
+        
+        if len(combined) < TIMEFRAMES['1Y']:
+            return None, stock_prices_dict, failed_symbols
+        
+        # Take the most recent 252+ days
+        combined = combined.tail(TIMEFRAMES['1Y'])
+        
+        # Fill any remaining NaN with forward fill then backward fill
+        combined = combined.ffill().bfill()
+        
+        # Calculate composite index
+        normalized = combined.div(combined.iloc[0]) * 100
+        composite_index = normalized.mean(axis=1)
+    else:
+        # Use common dates
+        common_dates = sorted(list(all_dates))[-TIMEFRAMES['1Y']:]
+        aligned_prices = pd.DataFrame({
+            symbol: prices.loc[common_dates]
+            for symbol, prices in stock_prices_dict.items()
+        })
+        
+        # Calculate composite index
+        normalized = aligned_prices.div(aligned_prices.iloc[0]) * 100
+        composite_index = normalized.mean(axis=1)
     
     return composite_index, stock_prices_dict, failed_symbols
 
@@ -95,15 +119,14 @@ def calculate_rs_rating(stock_prices_dict, composite_index):
     for idx, (symbol, prices) in enumerate(stock_prices_dict.items()):
         status_text.text(f"Calculating RS for {symbol}... ({idx+1}/{len(stock_prices_dict)})")
         
-        # Align stock prices with composite index
         try:
-            # Use outer join and forward fill to align dates
+            # Align stock prices with composite index using outer join
             aligned = pd.concat([prices, composite_index], axis=1, join='outer').sort_index()
             aligned.columns = ['stock', 'index']
-            aligned = aligned.fillna(method='ffill').dropna()
+            aligned = aligned.ffill().bfill().dropna()
             
             if len(aligned) < TIMEFRAMES['1Y']:
-                skipped.append(f"{symbol} (has {len(aligned)} days, need {TIMEFRAMES['1Y']})")
+                skipped.append(f"{symbol} (only {len(aligned)} days)")
                 continue
             
             stock_prices = aligned['stock']
@@ -122,7 +145,7 @@ def calculate_rs_rating(stock_prices_dict, composite_index):
                 skipped.append(f"{symbol} (NaN returns)")
                 continue
             
-            # Calculate relative performance (stock return - index return)
+            # Calculate relative performance
             relative_perf = {
                 period: stock_returns[period] - index_returns[period]
                 for period in TIMEFRAMES.keys()
@@ -134,7 +157,7 @@ def calculate_rs_rating(stock_prices_dict, composite_index):
                 **{f'RelPerf_{k}': v for k, v in relative_perf.items()}
             })
         except Exception as e:
-            skipped.append(f"{symbol} (error: {str(e)[:30]})")
+            skipped.append(f"{symbol} (error: {str(e)[:50]})")
             continue
         
         progress_bar.progress((idx + 1) / len(stock_prices_dict))
@@ -229,7 +252,12 @@ st.markdown("*Based on SEPA Methodology - Composite Index Benchmark*")
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Settings")
-    uploaded_file = st.file_uploader("Upload CSV (Symbol column)", type=['csv'])
+    uploaded_file = st.file_uploader("Upload CSV", type=['csv'])
+    
+    st.markdown("---")
+    st.markdown("**Series Filter**")
+    st.text("Auto-filters to EQ series")
+    st.text("(liquid equity stocks)")
     
     st.markdown("---")
     st.markdown("**Weights**")
@@ -243,6 +271,16 @@ if uploaded_file is not None:
     if 'Symbol' not in stocks_df.columns:
         st.error("❌ CSV must contain a 'Symbol' column")
     else:
+        # Filter by series if available (use only EQ series for liquid stocks)
+        if 'Series' in stocks_df.columns:
+            original_count = len(stocks_df)
+            stocks_df = stocks_df[stocks_df['Series'].str.strip().str.upper() == 'EQ']
+            st.info(f"📋 Filtered to {len(stocks_df)} EQ series stocks (from {original_count} total)")
+        
+        if len(stocks_df) == 0:
+            st.error("❌ No EQ series stocks found in CSV")
+            st.stop()
+        
         symbols = stocks_df['Symbol'].str.strip().tolist()
         
         st.info(f"📥 Loaded {len(symbols)} symbols")
@@ -332,10 +370,19 @@ else:
     st.info("👆 Upload CSV to begin")
     st.markdown("""
     **CSV Format:**
+    - Required: **Symbol** column
+    - Optional: **Series** column (will auto-filter to EQ)
+    
+    **NSE Series:**
+    - **EQ**: Equity (liquid stocks) ✅ Used
+    - **BE**: Trade-to-Trade (illiquid) ❌ Filtered out
+    - **SM**: SME (small/medium) ❌ Filtered out
+    
+    **Example:**
     ```
-    Symbol
-    RELIANCE
-    TCS
-    INFY
+    Symbol,Series
+    RELIANCE,EQ
+    TCS,EQ
+    INFY,EQ
     ```
     """)

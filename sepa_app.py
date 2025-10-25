@@ -272,9 +272,15 @@ if uploaded_file is not None:
         st.error("❌ CSV must contain a 'Symbol' column")
     else:
         # Filter by series if available (use only EQ series for liquid stocks)
-        if 'Series' in stocks_df.columns:
+        series_col = None
+        for col in ['SERIES', 'Series', 'series']:
+            if col in stocks_df.columns:
+                series_col = col
+                break
+        
+        if series_col:
             original_count = len(stocks_df)
-            stocks_df = stocks_df[stocks_df['Series'].str.strip().str.upper() == 'EQ']
+            stocks_df = stocks_df[stocks_df[series_col].str.strip().str.upper() == 'EQ']
             st.info(f"📋 Filtered to {len(stocks_df)} EQ series stocks (from {original_count} total)")
         
         if len(stocks_df) == 0:

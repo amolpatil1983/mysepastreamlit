@@ -26,7 +26,7 @@ def fetch_stock_data(symbol, period='1y'):
     try:
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period)
-        if df.empty or len(df) < 200:  # Need sufficient history
+        if df.empty:
             return None
         return df['Close']
     except:
@@ -40,11 +40,22 @@ def create_composite_index(symbols, period='1y'):
     progress_bar = st.progress(0)
     status_text = st.empty()
     
+    # Debug: Test first 5 symbols
+    debug_info = []
+    
     for idx, symbol in enumerate(symbols):
         nse_symbol = f"{symbol}.NS"
         status_text.text(f"Fetching {symbol}... ({idx+1}/{len(symbols)})")
         
         prices = fetch_stock_data(nse_symbol, period)
+        
+        # Debug first 5
+        if idx < 5:
+            if prices is not None:
+                debug_info.append(f"✓ {symbol}: {len(prices)} days")
+            else:
+                debug_info.append(f"✗ {symbol}: Failed")
+        
         if prices is not None and len(prices) >= TIMEFRAMES['1Y']:
             stock_prices_dict[symbol] = prices
         else:
@@ -55,7 +66,16 @@ def create_composite_index(symbols, period='1y'):
     progress_bar.empty()
     status_text.empty()
     
-    if len(stock_prices_dict) < 10:  # Need at least 10 stocks
+    # Show debug info
+    if debug_info:
+        with st.expander("🔍 Debug: First 5 symbols"):
+            for info in debug_info:
+                st.text(info)
+    
+    st.write(f"📊 Successfully fetched: {len(stock_prices_dict)} stocks with 252+ days")
+    
+    if len(stock_prices_dict) < 10:
+        return None, stock_prices_dict, failed_symbols  # Need at least 10 stocks
         return None, stock_prices_dict, failed_symbols
     
     # Find common date range across all stocks

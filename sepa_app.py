@@ -21,7 +21,7 @@ WEIGHTS = {
 }
 
 @st.cache_data(ttl=3600)
-def fetch_stock_data(symbol, period='1y'):
+def fetch_stock_data(symbol, period='400d'):
     """Fetch historical data for a single stock"""
     try:
         ticker = yf.Ticker(symbol)
@@ -32,7 +32,7 @@ def fetch_stock_data(symbol, period='1y'):
     except:
         return None
 
-def create_composite_index(symbols, period='1y'):
+def create_composite_index(symbols, period='400d'):
     """Create equal-weighted composite index from stock universe"""
     stock_prices_dict = {}
     failed_symbols = []
@@ -56,7 +56,7 @@ def create_composite_index(symbols, period='1y'):
             else:
                 debug_info.append(f"✗ {symbol}: Failed")
         
-        if prices is not None and len(prices) >= TIMEFRAMES['1Y']:
+        if prices is not None and len(prices) >= 200:  # Need at least 200 days
             stock_prices_dict[symbol] = prices
         else:
             failed_symbols.append(symbol)
@@ -72,9 +72,10 @@ def create_composite_index(symbols, period='1y'):
             for info in debug_info:
                 st.text(info)
     
-    st.write(f"📊 Successfully fetched: {len(stock_prices_dict)} stocks with 252+ days")
+    st.write(f"📊 Successfully fetched: {len(stock_prices_dict)} stocks with 200+ days")
     
-    if len(stock_prices_dict) < 10:
+    if len(stock_prices_dict) < 10:  # Need at least 10 stocks
+        return None, stock_prices_dict, failed_symbols
         return None, stock_prices_dict, failed_symbols  # Need at least 10 stocks
         return None, stock_prices_dict, failed_symbols
     
@@ -353,7 +354,19 @@ if uploaded_file is not None:
                         st.text(item)
             
             # Display options
-            top_n = st.slider("Top N stocks to display", 10, min(50, len(results_df)), 20)
+            col1, col2 = st.columns(2)
+            with col1:
+                filter_type = st.radio("Filter by:", ["RS Cutoff", "Top N"], horizontal=True)
+            with col2:
+                if filter_type == "RS Cutoff":
+                    rs_cutoff = st.slider("Minimum RS Rating", 0, 100, 70, 5)
+                    filtered_df = results_df[results_df['RS_Rating'] >= rs_cutoff]
+                    display_count = len(filtered_df)
+                    st.metric("Stocks Meeting Criteria", display_count)
+                else:
+                    top_n = st.slider("Top N stocks", 10, min(100, len(results_df)), 20)
+                    filtered_df = results_df.head(top_n)
+                    display_count = top_n
             
             # Display table
             st.subheader("📋 Rankings")

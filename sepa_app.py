@@ -361,49 +361,52 @@ if uploaded_file is not None:
                 if filter_type == "RS Cutoff":
                     rs_cutoff = st.slider("Minimum RS Rating", 0, 100, 70, 5)
                     filtered_df = results_df[results_df['RS_Rating'] >= rs_cutoff]
-                    display_count = len(filtered_df)
-                    st.metric("Stocks Meeting Criteria", display_count)
+                    st.metric("Stocks Meeting Criteria", len(filtered_df))
                 else:
                     top_n = st.slider("Top N stocks", 10, min(100, len(results_df)), 20)
                     filtered_df = results_df.head(top_n)
-                    display_count = top_n
             
-            # Display table
-            st.subheader("📋 Rankings")
-            
-            display_cols = ['Rank', 'Symbol', 'RS_Rating'] + \
-                          [f'Return_{p}' for p in TIMEFRAMES.keys()]
-            
-            st.dataframe(
-                results_df[display_cols].head(top_n).style.format({
-                    'RS_Rating': '{:.2f}',
-                    **{f'Return_{p}': '{:.2f}%' for p in TIMEFRAMES.keys()}
-                }),
-                use_container_width=True,
-                height=400
-            )
-            
-            # Download button
-            csv = results_df.to_csv(index=False)
-            st.download_button(
-                label="⬇️ Download Results",
-                data=csv,
-                file_name=f"rs_ratings_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv"
-            )
-            
-            # Visualizations
-            st.subheader("📊 Charts")
-            
-            tab1, tab2 = st.tabs(["RS Rating", "Returns Heatmap"])
-            
-            with tab1:
-                fig1 = create_rs_chart(results_df, top_n)
-                st.plotly_chart(fig1, use_container_width=True)
-            
-            with tab2:
-                fig2 = create_performance_heatmap(results_df, top_n)
-                st.plotly_chart(fig2, use_container_width=True)
+            if len(filtered_df) == 0:
+                st.warning("⚠️ No stocks meet the selected criteria. Try lowering the RS cutoff.")
+            else:
+                # Display table
+                st.subheader("📋 Rankings")
+                
+                display_cols = ['Rank', 'Symbol', 'RS_Rating'] + \
+                              [f'Return_{p}' for p in TIMEFRAMES.keys()]
+                
+                st.dataframe(
+                    filtered_df[display_cols].style.format({
+                        'RS_Rating': '{:.2f}',
+                        **{f'Return_{p}': '{:.2f}%' for p in TIMEFRAMES.keys()}
+                    }),
+                    use_container_width=True,
+                    height=400
+                )
+                
+                # Download button
+                csv = filtered_df.to_csv(index=False)
+                st.download_button(
+                    label="⬇️ Download Results",
+                    data=csv,
+                    file_name=f"rs_ratings_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+                
+                # Visualizations
+                st.subheader("📊 Charts")
+                
+                chart_limit = min(len(filtered_df), 30)
+                
+                tab1, tab2 = st.tabs(["RS Rating", "Returns Heatmap"])
+                
+                with tab1:
+                    fig1 = create_rs_chart(filtered_df, chart_limit)
+                    st.plotly_chart(fig1, use_container_width=True)
+                
+                with tab2:
+                    fig2 = create_performance_heatmap(filtered_df, chart_limit)
+                    st.plotly_chart(fig2, use_container_width=True)
 
 else:
     st.info("👆 Upload CSV to begin")

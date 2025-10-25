@@ -81,6 +81,11 @@ def calculate_rs_rating(stock_prices_dict, composite_index):
     progress_bar = st.progress(0)
     status_text = st.empty()
     
+    # Debug info
+    st.write(f"DEBUG: Processing {len(stock_prices_dict)} stocks")
+    st.write(f"DEBUG: Composite index length: {len(composite_index)}")
+    st.write(f"DEBUG: Required data points: {TIMEFRAMES['1Y']}")
+    
     for idx, (symbol, prices) in enumerate(stock_prices_dict.items()):
         status_text.text(f"Calculating RS for {symbol}... ({idx+1}/{len(stock_prices_dict)})")
         
@@ -89,7 +94,7 @@ def calculate_rs_rating(stock_prices_dict, composite_index):
             aligned = pd.concat([prices, composite_index], axis=1, join='inner').dropna()
             
             if len(aligned) < TIMEFRAMES['1Y']:
-                skipped.append(f"{symbol} (insufficient data)")
+                skipped.append(f"{symbol} (has {len(aligned)} days, need {TIMEFRAMES['1Y']})")
                 continue
             
             stock_prices = aligned.iloc[:, 0]

@@ -45,7 +45,7 @@ def create_composite_index(symbols, period='1y'):
         status_text.text(f"Fetching {symbol}... ({idx+1}/{len(symbols)})")
         
         prices = fetch_stock_data(nse_symbol, period)
-        if prices is not None:
+        if prices is not None and len(prices) >= TIMEFRAMES['1Y']:
             stock_prices_dict[symbol] = prices
         else:
             failed_symbols.append(symbol)
@@ -58,8 +58,19 @@ def create_composite_index(symbols, period='1y'):
     if not stock_prices_dict:
         return None, stock_prices_dict, failed_symbols
     
-    # Align all price series to common dates
-    all_prices_df = pd.concat(stock_prices_dict.values(), axis=1, join='inner', keys=stock_prices_dict.keys())
+    # Use outer join to keep all dates, then forward fill missing values
+    all_prices_df = pd.concat(stock_prices_dict.values(), axis=1, join='outer', keys=stock_prices_dict.keys())
+    all_prices_df = all_prices_df.sort_index()
+    
+    # Forward fill missing values (stocks that weren't trading on certain days)
+    all_prices_df = all_prices_df.fillna(method='ffill')
+    
+    # Only keep dates where at least 50% of stocks have data
+    threshold = len(stock_prices_dict) * 0.5
+    all_prices_df = all_prices_df.dropna(thresh=threshold)
+    
+    if len(all_prices_df) < TIMEFRAMES['1Y']:
+        return None, stock_prices_dict, failed_symbols
     
     # Calculate equal-weighted index (average of normalized prices)
     normalized = all_prices_df.div(all_prices_df.iloc[0]) * 100
@@ -81,24 +92,22 @@ def calculate_rs_rating(stock_prices_dict, composite_index):
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # Debug info
-    st.write(f"DEBUG: Processing {len(stock_prices_dict)} stocks")
-    st.write(f"DEBUG: Composite index length: {len(composite_index)}")
-    st.write(f"DEBUG: Required data points: {TIMEFRAMES['1Y']}")
-    
     for idx, (symbol, prices) in enumerate(stock_prices_dict.items()):
         status_text.text(f"Calculating RS for {symbol}... ({idx+1}/{len(stock_prices_dict)})")
         
         # Align stock prices with composite index
         try:
-            aligned = pd.concat([prices, composite_index], axis=1, join='inner').dropna()
+            # Use outer join and forward fill to align dates
+            aligned = pd.concat([prices, composite_index], axis=1, join='outer').sort_index()
+            aligned.columns = ['stock', 'index']
+            aligned = aligned.fillna(method='ffill').dropna()
             
             if len(aligned) < TIMEFRAMES['1Y']:
                 skipped.append(f"{symbol} (has {len(aligned)} days, need {TIMEFRAMES['1Y']})")
                 continue
             
-            stock_prices = aligned.iloc[:, 0]
-            index_prices = aligned.iloc[:, 1]
+            stock_prices = aligned['stock']
+            index_prices = aligned['index']
             
             stock_returns = {}
             index_returns = {}
